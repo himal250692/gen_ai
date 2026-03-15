@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
@@ -23,6 +25,10 @@ class IndexRequest(BaseModel):
 class AskRequest(BaseModel):
     question: str
     top_k: int = 3
+    filters: dict[str, Any] | None = None
+    include_passages: bool = False
+    llm_provider: str = "echo"
+    llm_model: str = "gpt-4o-mini"
     index_path: str = "data/index.faiss"
     metadata_path: str = "data/metadata.json"
 
@@ -51,6 +57,10 @@ def ask_endpoint(payload: AskRequest) -> dict[str, object]:
             index_path=payload.index_path,
             metadata_path=payload.metadata_path,
             top_k=payload.top_k,
+            filters=payload.filters,
+            include_passages=payload.include_passages,
+            llm_provider=payload.llm_provider,
+            llm_model=payload.llm_model,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

@@ -16,8 +16,17 @@
    ```
 2. Ask a question against the saved FAISS index:
    ```bash
-   python -m app.cli ask "What are the key points?"
+   python -m app.cli ask "What are the key points?" \
+     --top-k 5 \
+     --filter domain_tag=finance \
+     --filter page_min=2 \
+     --include-passages
    ```
+
+The `ask` command now returns:
+- final `answer` text from a configured LLM (`echo` by default, `openai` optionally),
+- explicit `citations` (`filename`, `page_number`, `chunk_id`),
+- optional raw `passages` when `--include-passages` is enabled.
 
 ### Run end to end via FastAPI
 
@@ -35,8 +44,24 @@
    ```bash
    curl -X POST http://127.0.0.1:8000/ask \
      -H "Content-Type: application/json" \
-     -d '{"question": "What are the key points?"}'
+     -d '{
+       "question": "What are the key points?",
+       "top_k": 4,
+       "filters": {"domain_tag": "finance"},
+       "include_passages": true,
+       "llm_provider": "echo"
+     }'
    ```
+
+## Query module
+
+`app/rag.py` provides retrieval + generation flow:
+
+1. Accept question + retrieval options (`top_k`, metadata filters).
+2. Retrieve top-k chunks from vector store.
+3. Build a grounded prompt that includes chunk text and source identifiers.
+4. Call an LLM through LangChain (`echo` local deterministic model or OpenAI model).
+5. Return answer + explicit citations + optional passages.
 
 ## Vector layer module
 
