@@ -5,6 +5,7 @@ import json
 
 from app.core import ask_question, index_directory
 from app.indexing import IndexingConfig
+from app.rag import parse_filter_args
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -26,6 +27,10 @@ def build_parser() -> argparse.ArgumentParser:
     ask_cmd.add_argument("--index-path", default="data/index.faiss")
     ask_cmd.add_argument("--metadata-path", default="data/metadata.json")
     ask_cmd.add_argument("--top-k", type=int, default=3)
+    ask_cmd.add_argument("--filter", action="append", default=[], help="Metadata filter in key=value format.")
+    ask_cmd.add_argument("--include-passages", action="store_true", help="Return raw retrieved passages.")
+    ask_cmd.add_argument("--llm-provider", default="echo", choices=["echo", "openai"])
+    ask_cmd.add_argument("--llm-model", default="gpt-4o-mini")
 
     return parser
 
@@ -56,6 +61,10 @@ def main() -> None:
             index_path=args.index_path,
             metadata_path=args.metadata_path,
             top_k=args.top_k,
+            filters=parse_filter_args(args.filter),
+            include_passages=args.include_passages,
+            llm_provider=args.llm_provider,
+            llm_model=args.llm_model,
         )
         print(json.dumps(response, indent=2))
 

@@ -1,19 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
 from app.indexing import IndexingConfig
+from app.rag import QueryOptions, query_index
 from app.vectorstore import DEFAULT_MODEL, VectorStore, VectorStoreConfig
-
-
-@dataclass
-class SearchResult:
-    chunk: str
-    source: str
-    score: float
-    metadata: dict[str, Any]
 
 
 def index_directory(
@@ -60,39 +52,21 @@ def ask_question(
     top_k: int = 3,
     model_name: str = DEFAULT_MODEL,
     filters: dict[str, Any] | None = None,
+    include_passages: bool = False,
+    llm_provider: str = "echo",
+    llm_model: str = "gpt-4o-mini",
 ) -> dict[str, object]:
-    store = VectorStore(
-        VectorStoreConfig(
-            backend="faiss",
-            model_name=model_name,
-            faiss_index_path=index_path,
-            faiss_metadata_path=metadata_path,
-        )
+    response = query_index(
+        question=question,
+        options=QueryOptions(
+            top_k=top_k,
+            filters=filters,
+            include_passages=include_passages,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+        ),
+        index_path=index_path,
+        metadata_path=metadata_path,
+        model_name=model_name,
     )
-    hits = store.search(question, top_k=top_k, filters=filters)
-
-    results: list[SearchResult] = []
-    for hit in hits:
-        metadata = hit["metadata"]
-        source = f"{metadata['filename']}:page{metadata['page_number']}"
-        results.append(
-            SearchResult(
-                chunk=hit["chunk_text"],
-                source=source,
-                score=hit["score"],
-                metadata=metadata,
-            )
-        )
-
-    answer = (
-        "Top matching context snippets:\n\n"
-        + "\n\n".join(f"[{r.source}] {r.chunk}" for r in results)
-        if results
-        else "No relevant context found."
-    )
-
-    return {
-        "question": question,
-        "answer": answer,
-        "results": [r.__dict__ for r in results],
-    }
+    return response.to_dict()

@@ -99,11 +99,13 @@ class VectorStore:
             record = metadata[idx]
             if not _metadata_matches(record["metadata"], filters):
                 continue
+            metadata = dict(record["metadata"])
+            metadata.setdefault("chunk_id", record.get("chunk_id"))
             results.append(
                 {
                     "chunk_text": record["chunk_text"],
                     "score": float(score),
-                    "metadata": record["metadata"],
+                    "metadata": metadata,
                 }
             )
             if len(results) == top_k:
@@ -133,6 +135,7 @@ class VectorStore:
                     vector=vector.tolist(),
                     payload={
                         "chunk_text": record["chunk_text"],
+                        "chunk_id": record.get("chunk_id"),
                         **record["metadata"],
                     },
                 )
