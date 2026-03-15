@@ -38,6 +38,49 @@
      -d '{"question": "What are the key points?"}'
    ```
 
+## Vector layer module
+
+`app/vectorstore.py` provides a reusable vector retrieval layer with:
+
+- Configurable Sentence Transformers embedding model.
+- Indexing from the chunk output produced by `app.indexing.build_index`.
+- Two storage backends:
+  - FAISS index persisted on disk (`data/index.faiss`) plus metadata JSON (`data/metadata.json`).
+  - Qdrant collection with payload metadata.
+- Retrieval API: `search(query, top_k, filters=None)` returning `chunk_text`, `score`, and `metadata`.
+
+Example:
+
+```python
+from app.indexing import IndexingConfig
+from app.vectorstore import VectorStore, VectorStoreConfig
+
+store = VectorStore(
+    VectorStoreConfig(
+        backend="faiss",  # or "qdrant"
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+    )
+)
+
+store.index_directory(
+    input_dir="data/pdfs",
+    indexing_config=IndexingConfig(domain_tag="finance"),
+)
+
+results = store.search(
+    query="quarterly revenue outlook",
+    top_k=5,
+    filters={
+        "filename": "q1_report.pdf",
+        "domain_tag": "finance",
+        "page_min": 2,
+        "page_max": 8,
+    },
+)
+```
+
+Supported filter keys include metadata fields such as `filename`, `domain_tag`, `source_path`, `chunk_index`, exact `page_number`, and page ranges via `page_min`/`page_max`.
+
 Indexing persists:
 - Vector index: `data/index.faiss`
 - Chunk metadata: `data/metadata.json`

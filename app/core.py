@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
-import faiss
-from sentence_transformers import SentenceTransformer
-
-from app.indexing import IndexingConfig, build_index
-
-DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+from app.indexing import IndexingConfig
+from app.vectorstore import DEFAULT_MODEL, VectorStore, VectorStoreConfig
 
 
 @dataclass
@@ -18,12 +13,7 @@ class SearchResult:
     chunk: str
     source: str
     score: float
-
-
-
-def _load_embedder(model_name: str = DEFAULT_MODEL) -> SentenceTransformer:
-    return SentenceTransformer(model_name)
-
+    metadata: dict[str, Any]
 
 
 def index_directory(
@@ -33,27 +23,15 @@ def index_directory(
     metadata_path: str = "data/metadata.json",
     model_name: str = DEFAULT_MODEL,
 ) -> dict[str, int]:
-    chunk_records = build_index(input_dir=input_dir, config=config)
-
-    if not chunk_records:
-        raise ValueError("No text chunks found in the provided PDFs.")
-
-    embedder = _load_embedder(model_name)
-    vectors = embedder.encode([record["chunk_text"] for record in chunk_records], normalize_embeddings=True)
-
-    index = faiss.IndexFlatIP(vectors.shape[1])
-    index.add(vectors)
-
-    Path(index_path).parent.mkdir(parents=True, exist_ok=True)
-    Path(metadata_path).parent.mkdir(parents=True, exist_ok=True)
-    faiss.write_index(index, index_path)
-    Path(metadata_path).write_text(json.dumps(chunk_records, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    return {
-        "documents": len({record["metadata"]["filename"] for record in chunk_records}),
-        "chunks": len(chunk_records),
-    }
-
+    store = VectorStore(
+        VectorStoreConfig(
+            backend="faiss",
+            model_name=model_name,
+            faiss_index_path=index_path,
+            faiss_metadata_path=metadata_path,
+        )
+    )
+    return store.index_directory(input_dir=input_dir, indexing_config=config)
 
 
 def index_pdfs(
@@ -62,20 +40,17 @@ def index_pdfs(
     metadata_path: str = "data/metadata.json",
     model_name: str = DEFAULT_MODEL,
 ) -> dict[str, int]:
-    pdf_list = [Path(path) for path in pdf_paths]
+    pdf_list = list(pdf_paths)
     if not pdf_list:
         raise ValueError("No PDF paths supplied.")
 
-    input_dir = str(pdf_list[0].parent)
-    config = IndexingConfig(glob_pattern="*.pdf")
     return index_directory(
-        input_dir=input_dir,
-        config=config,
+        input_dir=str(Path(pdf_list[0]).parent),
+        config=IndexingConfig(glob_pattern="*.pdf"),
         index_path=index_path,
         metadata_path=metadata_path,
         model_name=model_name,
     )
-
 
 
 def ask_question(
@@ -84,28 +59,30 @@ def ask_question(
     metadata_path: str = "data/metadata.json",
     top_k: int = 3,
     model_name: str = DEFAULT_MODEL,
+    filters: dict[str, Any] | None = None,
 ) -> dict[str, object]:
-    index_file = Path(index_path)
-    metadata_file = Path(metadata_path)
-
-    if not index_file.exists() or not metadata_file.exists():
-        raise FileNotFoundError("Index files not found. Run indexing first.")
-
-    index = faiss.read_index(str(index_file))
-    metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
-
-    embedder = _load_embedder(model_name)
-    query_vec = embedder.encode([question], normalize_embeddings=True)
-
-    distances, indices = index.search(query_vec, top_k)
+    store = VectorStore(
+        VectorStoreConfig(
+            backend="faiss",
+            model_name=model_name,
+            faiss_index_path=index_path,
+            faiss_metadata_path=metadata_path,
+        )
+    )
+    hits = store.search(question, top_k=top_k, filters=filters)
 
     results: list[SearchResult] = []
-    for score, idx in zip(distances[0], indices[0]):
-        if idx < 0 or idx >= len(metadata):
-            continue
-        entry = metadata[idx]
-        source = f"{entry['metadata']['filename']}:page{entry['metadata']['page_number']}"
-        results.append(SearchResult(chunk=entry["chunk_text"], source=source, score=float(score)))
+    for hit in hits:
+        metadata = hit["metadata"]
+        source = f"{metadata['filename']}:page{metadata['page_number']}"
+        results.append(
+            SearchResult(
+                chunk=hit["chunk_text"],
+                source=source,
+                score=hit["score"],
+                metadata=metadata,
+            )
+        )
 
     answer = (
         "Top matching context snippets:\n\n"
