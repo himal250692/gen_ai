@@ -10,9 +10,9 @@
 
 ### Run end to end via CLI
 
-1. Index one or more PDF files:
+1. Index PDFs from a directory (defaults to `data/pdfs`):
    ```bash
-   python -m app.cli index path/to/doc1.pdf path/to/doc2.pdf
+   python -m app.cli index --input-dir data/pdfs --domain-tag finance
    ```
 2. Ask a question against the saved FAISS index:
    ```bash
@@ -29,7 +29,7 @@
    ```bash
    curl -X POST http://127.0.0.1:8000/index \
      -H "Content-Type: application/json" \
-     -d '{"pdf_paths": ["path/to/doc1.pdf", "path/to/doc2.pdf"]}'
+     -d '{"input_dir": "data/pdfs", "domain_tag": "finance"}'
    ```
 3. Ask a question:
    ```bash
@@ -38,4 +38,7 @@
      -d '{"question": "What are the key points?"}'
    ```
 
-Both interfaces persist data in `data/index.faiss` and `data/metadata.json` by default.
+Indexing persists:
+- Vector index: `data/index.faiss`
+- Chunk metadata: `data/metadata.json`
+- Intermediate extraction/chunk trace: `data/indexing_trace.json`

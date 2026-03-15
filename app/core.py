@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Iterable
 
 import faiss
-from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
+
+from app.indexing import IndexingConfig, build_index
 
 DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
@@ -19,33 +20,40 @@ class SearchResult:
     score: float
 
 
+
 def _load_embedder(model_name: str = DEFAULT_MODEL) -> SentenceTransformer:
     return SentenceTransformer(model_name)
 
 
-def _chunk_text(text: str, chunk_size: int = 800, overlap: int = 100) -> list[str]:
-    cleaned = " ".join(text.split())
-    if not cleaned:
-        return []
-    chunks: list[str] = []
-    start = 0
-    while start < len(cleaned):
-        end = min(start + chunk_size, len(cleaned))
-        chunks.append(cleaned[start:end])
-        if end == len(cleaned):
-            break
-        start = max(0, end - overlap)
-    return chunks
 
+def index_directory(
+    input_dir: str = "data/pdfs",
+    config: IndexingConfig | None = None,
+    index_path: str = "data/index.faiss",
+    metadata_path: str = "data/metadata.json",
+    model_name: str = DEFAULT_MODEL,
+) -> dict[str, int]:
+    chunk_records = build_index(input_dir=input_dir, config=config)
 
-def _extract_pdf_chunks(pdf_path: Path) -> list[dict[str, str]]:
-    reader = PdfReader(str(pdf_path))
-    chunks: list[dict[str, str]] = []
-    for page_number, page in enumerate(reader.pages, start=1):
-        text = page.extract_text() or ""
-        for chunk in _chunk_text(text):
-            chunks.append({"text": chunk, "source": f"{pdf_path.name}:page{page_number}"})
-    return chunks
+    if not chunk_records:
+        raise ValueError("No text chunks found in the provided PDFs.")
+
+    embedder = _load_embedder(model_name)
+    vectors = embedder.encode([record["chunk_text"] for record in chunk_records], normalize_embeddings=True)
+
+    index = faiss.IndexFlatIP(vectors.shape[1])
+    index.add(vectors)
+
+    Path(index_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(metadata_path).parent.mkdir(parents=True, exist_ok=True)
+    faiss.write_index(index, index_path)
+    Path(metadata_path).write_text(json.dumps(chunk_records, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return {
+        "documents": len({record["metadata"]["filename"] for record in chunk_records}),
+        "chunks": len(chunk_records),
+    }
+
 
 
 def index_pdfs(
@@ -54,26 +62,20 @@ def index_pdfs(
     metadata_path: str = "data/metadata.json",
     model_name: str = DEFAULT_MODEL,
 ) -> dict[str, int]:
-    docs: list[dict[str, str]] = []
-    for path in pdf_paths:
-        docs.extend(_extract_pdf_chunks(Path(path)))
+    pdf_list = [Path(path) for path in pdf_paths]
+    if not pdf_list:
+        raise ValueError("No PDF paths supplied.")
 
-    if not docs:
-        raise ValueError("No text chunks found in the provided PDFs.")
+    input_dir = str(pdf_list[0].parent)
+    config = IndexingConfig(glob_pattern="*.pdf")
+    return index_directory(
+        input_dir=input_dir,
+        config=config,
+        index_path=index_path,
+        metadata_path=metadata_path,
+        model_name=model_name,
+    )
 
-    embedder = _load_embedder(model_name)
-    vectors = embedder.encode([d["text"] for d in docs], normalize_embeddings=True)
-
-    index = faiss.IndexFlatIP(vectors.shape[1])
-    index.add(vectors)
-
-    Path(index_path).parent.mkdir(parents=True, exist_ok=True)
-    Path(metadata_path).parent.mkdir(parents=True, exist_ok=True)
-    faiss.write_index(index, index_path)
-    with Path(metadata_path).open("w", encoding="utf-8") as f:
-        json.dump(docs, f, ensure_ascii=False, indent=2)
-
-    return {"documents": len(set(Path(p).name for p in pdf_paths)), "chunks": len(docs)}
 
 
 def ask_question(
@@ -102,7 +104,8 @@ def ask_question(
         if idx < 0 or idx >= len(metadata):
             continue
         entry = metadata[idx]
-        results.append(SearchResult(chunk=entry["text"], source=entry["source"], score=float(score)))
+        source = f"{entry['metadata']['filename']}:page{entry['metadata']['page_number']}"
+        results.append(SearchResult(chunk=entry["chunk_text"], source=source, score=float(score)))
 
     answer = (
         "Top matching context snippets:\n\n"
