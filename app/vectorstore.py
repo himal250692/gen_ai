@@ -87,25 +87,26 @@ class VectorStore:
             raise FileNotFoundError("FAISS index files were not found. Index documents first.")
 
         index = faiss.read_index(str(index_path))
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        records = json.loads(metadata_path.read_text(encoding="utf-8"))
 
-        search_k = min(len(metadata), max(top_k * 5, top_k))
+        search_k = min(len(records), max(top_k * 5, top_k))
         scores, indices = index.search(query_vec, search_k)
 
         results: list[dict[str, Any]] = []
         for score, idx in zip(scores[0], indices[0]):
-            if idx < 0 or idx >= len(metadata):
+            idx_int = int(idx)
+            if idx_int < 0 or idx_int >= len(records):
                 continue
-            record = metadata[idx]
+            record = records[idx_int]
             if not _metadata_matches(record["metadata"], filters):
                 continue
-            metadata = dict(record["metadata"])
-            metadata.setdefault("chunk_id", record.get("chunk_id"))
+            result_metadata = dict(record["metadata"])
+            result_metadata.setdefault("chunk_id", record.get("chunk_id"))
             results.append(
                 {
                     "chunk_text": record["chunk_text"],
                     "score": float(score),
-                    "metadata": metadata,
+                    "metadata": result_metadata,
                 }
             )
             if len(results) == top_k:
