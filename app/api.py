@@ -3,13 +3,19 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from app.core import ask_question, index_pdfs
+from app.core import ask_question, index_directory
+from app.indexing import IndexingConfig
 
 app = FastAPI(title="Gen AI PDF QA API", version="0.1.0")
 
 
 class IndexRequest(BaseModel):
-    pdf_paths: list[str] = Field(..., description="List of PDF paths reachable by the API process.")
+    input_dir: str = Field("data/pdfs", description="Directory that contains PDF files.")
+    glob_pattern: str = "*.pdf"
+    domain_tag: str = "general"
+    chunk_size: int = 800
+    chunk_overlap: int = 100
+    trace_path: str = "data/indexing_trace.json"
     index_path: str = "data/index.faiss"
     metadata_path: str = "data/metadata.json"
 
@@ -24,7 +30,14 @@ class AskRequest(BaseModel):
 @app.post("/index")
 def index_endpoint(payload: IndexRequest) -> dict[str, object]:
     try:
-        stats = index_pdfs(payload.pdf_paths, payload.index_path, payload.metadata_path)
+        config = IndexingConfig(
+            chunk_size=payload.chunk_size,
+            chunk_overlap=payload.chunk_overlap,
+            glob_pattern=payload.glob_pattern,
+            domain_tag=payload.domain_tag,
+            trace_path=payload.trace_path,
+        )
+        stats = index_directory(payload.input_dir, config, payload.index_path, payload.metadata_path)
         return {"status": "indexed", **stats}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
