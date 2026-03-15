@@ -6,7 +6,39 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+try:
+    # LangChain split text splitter helpers into a dedicated package.
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError:  # pragma: no cover - backward compatibility path
+    try:
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+    except ImportError:
+        class RecursiveCharacterTextSplitter:  # pragma: no cover - lightweight fallback
+            def __init__(self, chunk_size: int = 800, chunk_overlap: int = 100) -> None:
+                if chunk_size <= 0:
+                    raise ValueError("chunk_size must be > 0")
+                if chunk_overlap < 0:
+                    raise ValueError("chunk_overlap must be >= 0")
+                if chunk_overlap >= chunk_size:
+                    raise ValueError("chunk_overlap must be smaller than chunk_size")
+                self.chunk_size = chunk_size
+                self.chunk_overlap = chunk_overlap
+
+            def split_text(self, text: str) -> list[str]:
+                text = text.strip()
+                if not text:
+                    return []
+
+                step = self.chunk_size - self.chunk_overlap
+                chunks: list[str] = []
+                start = 0
+                while start < len(text):
+                    end = min(start + self.chunk_size, len(text))
+                    chunks.append(text[start:end])
+                    if end >= len(text):
+                        break
+                    start += step
+                return chunks
 from pypdf import PdfReader
 
 
